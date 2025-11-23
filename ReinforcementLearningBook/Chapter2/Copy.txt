@@ -1,0 +1,279 @@
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+import math
+
+
+class Distributions:
+    def update(self, reward):
+        raise NotImplementedError
+    def calculateReward(self, actionIndex):
+        raise NotImplementedError
+
+
+class NonStationaryDistribution(Distributions):
+    def __init__(self, numberActions, varianceLimit):
+        self.numberActions = numberActions
+        optimalStartingPoint = np.random.normal()
+        self.optimalReward = np.array([ optimalStartingPoint for q_a in range(numberActions)])
+        self.std = np.sqrt(np.random.choice(int(varianceLimit)))
+
+    def update(self):
+        self.optimalReward += np.array([np.random.normal(0,0.01) for q_a in range(self.numberActions)])
+
+    def calculateReward(self, actionIndex):
+        return np.random.normal(self.optimalReward[actionIndex], self.std)
+
+
+class StationaryDistribution(Distributions):
+    def __init__(self, numberActions, varianceLimit):
+        self.numberActions = numberActions
+        self.actualExpectedRewards = [np.random.normal() for q_a in range(numberActions)]
+        std = np.sqrt(np.random.choice(int(varianceLimit)))
+        distributions = [(mean,std) for mean in self.actualExpectedRewards]
+        
+    def calculateReward(self, actionIndex):
+        mean,deviation = self.distributions[actionIndex]
+        return np.random.normal(mean,deviation)
+
+
+
+def softmax(x):
+    exponents = np.exp(x - np.max(x)) # to stop from causing poverflow essentially scaling down, relationship is still the same
+    return exponents / np.sum(exponents)
+
+def gradientBandit(numberActions: int, varianceLimit:float, timesteps: int, stepSizeParameter):
+    # Initalize optimal rewards with points from same distribution
+    optimalReward = np.array([ np.random.normal(4.0,1.0) for q_a in range(numberActions)])
+
+    # create a std from varianceLimit
+    std = 1.0 # np.sqrt(np.random.choice(int(varianceLimit)))
+
+
+    preferences = np.zeros(numberActions)
+    baselineRewards = np.zeros(numberActions)
+
+    rewardsPerTimestep = []
+
+    for time in range(timesteps):
+
+        # adds a small random step to each optimal q_a
+        optimalReward += np.array([np.random.normal(0,0.01) for q_a in range(numberActions)])
+
+        actionIndex = np.random.choice(numberActions, p=softmax(preferences))
+ 
+        # Calculate Current Rewards for choosing action - sample from this new changed distribution
+        currentReward = np.random.normal(optimalReward[actionIndex], std)
+
+        # append rewards
+        rewardsPerTimestep.append(currentReward)
+
+        preferences = preferences + stepSizeParameter * ((currentReward - baselineRewards)*((np.eye(1,numberActions,actionIndex).flatten()) - softmax(preferences)))
+
+        baselineRewards[actionIndex] = ((1 - stepSizeParameter) *  baselineRewards[actionIndex]) + (currentReward * stepSizeParameter)
+
+    return rewardsPerTimestep
+
+# whats a good design pattern where i have different input parameters -> one function -> consistent output results for all?
+def upperConfidenceBoundBandit(numberActions: int, varianceLimit:float, timesteps: int, stepSizeParameter, c: float):
+    actualExpectedRewards = [np.random.normal() for q_a in range(numberActions)]
+    # Create Distributions using random standard deviation and actual expected return as mean
+    std = np.sqrt(np.random.choice(int(varianceLimit)))
+    distributions = [(mean,std) for mean in actualExpectedRewards]
+
+    # current Q prediction values - same as intialPredictionValues, but inital never changes
+    valuePredictions = np.zeros(numberActions)
+    totalActionTaken = np.zeros(numberActions)
+
+    rewardsPerTimestep = []
+
+    parameter_denominator = 0
+
+    for t in range(timesteps):
+
+
+        actionIndex = np.argmax([
+            (valuePrediction + (c * math.sqrt(math.log(t)/totalActionTaken[index])))  if totalActionTaken[index] != 0
+            else float('inf')
+            for index,valuePrediction in enumerate(valuePredictions)])
+
+        totalActionTaken[actionIndex] += 1
+
+        # Calculate Current Rewards for choosing action
+        mean,deviation = distributions[actionIndex]
+        currentReward = np.random.normal(mean,deviation)
+
+        # append rewards
+        rewardsPerTimestep.append(currentReward)
+
+        parameter_denominator = parameter_denominator + stepSizeParameter * (1 - parameter_denominator)
+        Beta = stepSizeParameter / parameter_denominator
+
+        valuePredictions[actionIndex] = ((1 - Beta) * valuePredictions[actionIndex]) + (Beta * currentReward)
+
+    return rewardsPerTimestep
+
+def optimalStepSizeBandit(numberActions: int, varianceLimit:float, epsilon:float, timesteps: int, stepSizeParameter):
+    optimalStartingPoint = np.random.normal()
+    optimalReward = np.array([ optimalStartingPoint for q_a in range(numberActions)])
+
+    # create a std from varianceLimit
+    std = np.sqrt(np.random.choice(int(varianceLimit)))
+
+    # Create Probabilities out of epsilon
+    probs = [(1-epsilon), epsilon]
+
+    # current Q prediction values - same as intialPredictionValues, but inital never changes
+    valuePredictions = np.zeros(numberActions)
+
+    rewardsPerTimestep = []
+
+    parameter_denominator = 0
+
+    for t in range(timesteps):
+
+        # adds a small random step to each optimal q_a
+        optimalReward += np.array([np.random.normal(0,0.01) for q_a in range(numberActions)])
+
+        # Action if being greedy -> Choose Greatest Reward, Action if not being greedy -> Explore
+        greedyAction = np.argmax(valuePredictions)
+        nonGreedyAction = np.random.choice(numberActions)
+
+        # Choose between explore and exploit
+        actionIndex = np.random.choice([greedyAction, nonGreedyAction], p=probs)
+ 
+        # Calculate Current Rewards for choosing action - sample from this new changed distribution
+        currentReward = np.random.normal(optimalReward[actionIndex], std)
+
+        # append rewards
+        rewardsPerTimestep.append(currentReward)
+
+        parameter_denominator = parameter_denominator + stepSizeParameter * (1 - parameter_denominator)
+        Beta = stepSizeParameter / parameter_denominator
+
+        valuePredictions[actionIndex] = ((1 - Beta) * valuePredictions[actionIndex]) + (Beta * currentReward)
+
+    return rewardsPerTimestep
+
+def dynamicBandit(numberActions: int, varianceLimit:float, epsilon:float, timesteps: int, stepSizeParameter):
+    # Initalize optimal rewards, each start at the same point
+    optimalStartingPoint = np.random.normal()
+    optimalReward = np.array([ optimalStartingPoint for q_a in range(numberActions)])
+
+    # create a std from varianceLimit
+    std = np.sqrt(np.random.choice(int(varianceLimit)))
+
+    # Create Probabilities out of epsilon
+    probs = [(1-epsilon), epsilon]
+
+    # current Q prediction values - same as intialPredictionValues, but inital never changes
+    valuePredictions = np.zeros(numberActions)
+
+    rewardsPerTimestep = []
+
+    for t in range(timesteps):
+
+        # adds a small random step to each optimal q_a
+        optimalReward += np.array([np.random.normal(0,0.01) for q_a in range(numberActions)])
+
+        # Action if being greedy -> Choose Greatest Reward, Action if not being greedy -> Explore
+        greedyAction = np.argmax(valuePredictions)
+        nonGreedyAction = np.random.choice(numberActions)
+
+        # Choose between explore and exploit
+        actionIndex = np.random.choice([greedyAction, nonGreedyAction], p=probs)
+ 
+        # Calculate Current Rewards for choosing action - sample from this new changed distribution
+        currentReward = np.random.normal(optimalReward[actionIndex], std)
+
+        # append rewards
+        rewardsPerTimestep.append(currentReward)
+
+        # Update Variables -> The Actual Update Step : (1 - a)^n * Q_1 + Sum_i=1:n ( a * (1 - a)^n-i * R_i)
+        valuePredictions[actionIndex] = ((1 - stepSizeParameter) *  valuePredictions[actionIndex]) + (currentReward * stepSizeParameter)
+
+    return rewardsPerTimestep
+
+def stationaryBandit(numberActions: int, varianceLimit:float, epsilon:float, timesteps: int):
+    # sample actual expected returns from normal distributions
+    actualExpectedRewards = [np.random.normal() for q_a in range(numberActions)]
+    # Create Distributions using random standard deviation and actual expected return as mean
+    std = np.sqrt(np.random.choice(int(varianceLimit)))
+    distributions = [(mean,std) for mean in actualExpectedRewards]
+    # Create Probabilities out of epsilon
+    probs = [(1-epsilon), epsilon]
+    # The Last return value, number of times action has been chosen
+    incrementalAverage = np.zeros(numberActions)
+    numberTimesActionSeen = np.zeros(numberActions)
+
+    rewardsPerTimestep = []
+
+    for t in range(timesteps):
+
+        # Action if being greedy -> Choose Greatest Reward, Action if not being greedy -> Explore
+        greedyAction = np.argmax(incrementalAverage)
+        nonGreedyAction = np.random.choice(numberActions)
+        # Choose between explore and exploit
+        actionIndex = np.random.choice([greedyAction, nonGreedyAction], p=probs)
+ 
+        # Calculate Current Rewards for choosing action
+        mean,deviation = distributions[actionIndex]
+        currentReward = np.random.normal(mean,deviation)
+
+        # append rewards
+        rewardsPerTimestep.append(currentReward)
+
+        # Update Variables -> The Actual Update Step : Q_n+1 +  1/n * [ R_n - Q_ni ]
+        # We are now updating the average incrementally, this average will be used in the next timestep
+        numberTimesActionSeen[actionIndex] += 1
+        incrementalAverage[actionIndex] = incrementalAverage[actionIndex] + (1/ numberTimesActionSeen[actionIndex]) * (currentReward - incrementalAverage[actionIndex])
+
+
+    return np.array(rewardsPerTimestep)
+
+
+RunList = [2000]
+Actions = 10
+VarianceLimit = 1.0
+epsilonList = [0.1]
+timestepList = [1_000]
+stepSizeParameter = 0.1
+
+
+plt.figure(figsize=(10,6))  # Create one figure for all lines
+
+for Runs in RunList:
+    for epsilon in epsilonList:
+        for timestep in timestepList:
+
+            averageRewards = np.zeros(timestep)
+            for run in range(Runs):
+                if run % 100 == 0:
+                    print("*"*20 + f"Log {run}" + "*" * 20)
+
+                #rewards = stationaryBandit(Actions, VarianceLimit, epsilon, timestep)
+                #rewards = dynamicBandit(Actions, VarianceLimit, epsilon, timestep, stepSizeParameter)
+                #rewards = optimalStepSizeBandit(Actions, VarianceLimit, epsilon, timestep, stepSizeParameter)
+                #rewards = upperConfidenceBoundBandit(Actions, VarianceLimit, timestep, stepSizeParameter, 2)
+                rewards = gradientBandit(Actions, VarianceLimit,timestep,stepSizeParameter)
+                averageRewards += rewards
+
+            averageRewards /= Runs
+
+            plt.plot(
+                np.arange(timestep),
+                averageRewards,
+                label=f"Runs={Runs}, eps={epsilon}, t={timestep}"
+            )
+
+            print(f"Succesfully Finished Run with the parameters -> Runs={Runs}, eps={epsilon}, t={timestep}")
+
+print("Succefully Finished All Runs, creating plot...")
+plt.xlabel('Timesteps')
+plt.ylabel('Average Reward')
+plt.title(f"Average Rewards over Different Parameters")
+
+plt.legend()
+plt.grid(True)
+
+plt.savefig(f"non_greedy_average_rewards.png")
