@@ -52,7 +52,7 @@ plt.figure(figsize=(10,6))  # Create one figure for all lines
 agent = Agent()
 
 BanditProblemInfo = {
-    "gradient": [SoftmaxPolicy(c), gradientUpdate(Actions, stepSizeParameter)],
+    "gradient": [SoftmaxPolicy(), gradientUpdate(Actions, stepSizeParameter)],
     "upperConfidence":[UpperConfidencePolicy(c),optimalStepSizeUpdate(Actions, stepSizeParameter)],
     "optimalStepSize":[EpsilonGreedyPolicy(epsilon), optimalStepSizeUpdate(Actions, stepSizeParameter)],
     "dynamic":[EpsilonGreedyPolicy(epsilon),DynamicUpdates(Actions, stepSizeParameter)],

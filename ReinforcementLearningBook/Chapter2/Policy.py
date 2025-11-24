@@ -13,12 +13,6 @@ class Policy(ABC):
 
 class SoftmaxPolicy(Policy):
 
-    def Reset(self):
-        pass
-
-    def __init__(self, c):
-        self.c = c
-
     def calculatePolicy(self, state: State):
         t, valuePredictions, totalActionTaken = state.timestamp, state.valuePredictions, state.totalActionTaken
         return np.random.choice(len(valuePredictions), p=softmax(valuePredictions))
